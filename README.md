@@ -1,106 +1,67 @@
-🎥 RecordClip Studio Pro
-RecordClip Studio Pro es una suite de grabación de alto rendimiento diseñada para creadores de contenido y gamers. Utiliza una arquitectura híbrida única: combina la potencia bruta de FFmpeg para el vídeo (acelerado por GPU) con la precisión de Python (SoundCard/NumPy) para el procesamiento de audio multipista en alta fidelidad.
+🎥 RecordClip 5
+RecordClip 5 es una herramienta de grabación de alto rendimiento diseñada para capturar tus mejores momentos de juego sin sacrificar FPS. Utiliza una arquitectura híbrida única: vídeo acelerado por hardware (FFmpeg/NVENC) y audio de alta fidelidad (32-bit Float) mediante Python.
 
-A diferencia de otros grabadores, RecordClip está optimizado para Replay Buffer (ShadowPlay) y grabación de audio 32-bit Float, permitiendo una edición en cámara lenta (slow-motion) sin distorsión robótica.
+Diseñado para ser ligero, potente y con Replay Buffer (grabación en RAM) incluido.
 
-✨ Características Principales
-🎬 Vídeo de Alto Rendimiento
-Motor FFmpeg Nativo: Integración directa con ddagrab (Desktop Duplication API) para una captura con latencia cero.
+🚀 Instalación Rápida
+Solo necesitas 3 pasos para empezar:
 
-Soporte NVENC (NVIDIA): Configurado con presets P1 (Ultra Performance) y ULL (Ultra Low Latency).
+1. Instalar Python
+Asegúrate de tener instalado Python 3.10 o superior.
 
-Altos FPS: Soporte probado para grabaciones de hasta 240 FPS estables.
+Importante: Marca la casilla "Add Python to PATH" durante la instalación.
 
-Buffer en RAM: Grabación cíclica en memoria RAM (sin desgaste de SSD) para guardar los últimos "X" segundos de juego (Replay).
+2. Colocar FFmpeg
+Descarga la versión Full Build de FFmpeg (Gyan.dev).
 
-🎙️ Audio de Estudio (Ultra-High Fidelity)
-32-bit Float Audio: Grabación en rango dinámico infinito. Imposible de saturar (clipping) y perfecto para post-producción.
+Abre el archivo descargado, entra en la carpeta bin.
 
-Alta Frecuencia de Muestreo: Soporte nativo para 48kHz y experimental para 96kHz, ideal para ralentizar el audio sin pérdida de calidad.
+Extrae el archivo ffmpeg.exe y pégalo dentro de esta misma carpeta (junto a main_ui.py).
 
-Pistas Independientes: Graba tu micrófono, el juego y Discord en pistas separadas dentro del mismo archivo MKV.
+3. Ejecutar el Instalador
+Haz doble clic en el archivo install.bat.
 
-Búfer Masivo: Sistema de búfer de 8192 muestras para eliminar cualquier artefacto robótico o glitch sonoro.
+Esto instalará automáticamente todas las librerías necesarias.
 
-🎨 Interfaz Moderna
-UI Profesional: Interfaz construida en PyQt6 con diseño de tarjetas.
+Aplicará el parche de compatibilidad para el audio (NumPy < 2.0).
 
-Temas Dinámicos: Cambio instantáneo entre Modo Oscuro (Dark Slate) y Modo Claro.
+🎮 Cómo Usar
+Una vez instalado, tienes dos formas de abrir el programa:
 
-Perfiles: Guarda y carga configuraciones para distintos juegos o situaciones.
+Opción Recomendada: Ejecuta run.vbs.
 
-Atajos Globales: Controla la grabación y el guardado de clips con el teclado (F9, F10, etc.) aunque la app esté minimizada.
+Esto abrirá el programa de forma silenciosa (sin la ventana negra de comandos de fondo).
 
-🛠️ Instalación
-1. Requisitos Previos
-Python 3.10 o superior.
+Opción Debug: Ejecuta run.bat.
 
-Tarjeta Gráfica NVIDIA (Recomendada para el modo NVENC).
+Útil si tienes problemas y necesitas ver los mensajes de error en la consola.
 
-Windows 10/11.
+Características
+Configuración de Vídeo: Soporte para NVENC (NVIDIA), altos FPS (hasta 240fps) y bitrate ajustable.
 
-2. Clonar el Repositorio
-Bash
+Audio Multipista: Graba tu micrófono y el sonido del juego/Discord en pistas separadas.
 
-git clone https://github.com/tu-usuario/RecordClip-Studio.git
-cd RecordClip-Studio
-3. Instalar Dependencias
-Es CRÍTICO instalar las versiones correctas para evitar conflictos de audio con NumPy 2.0. Ejecuta el script automático:
+Modo Buffer: Mantén los últimos segundos en la memoria RAM y guárdalos solo cuando ocurra algo épico.
 
-Opción A (Automática): Ejecuta el archivo install.bat.
+Perfiles: Guarda tus configuraciones favoritas.
 
-Opción B (Manual):
+📁 Estructura de Archivos
+main_ui.py: La interfaz gráfica principal.
 
-Bash
+recorder_core.py: El motor de grabación (vídeo + audio sync).
 
-pip install PyQt6 pynput
-pip install "numpy<2.0" soundcard soundfile --force-reinstall
-4. Configurar FFmpeg
-El programa requiere una versión Full Build de FFmpeg (con soporte de librerías compartidas).
+audio_manager.py: Sistema de detección de dispositivos de audio.
 
-Descarga FFmpeg (versión ffmpeg-git-full.7z recomendada) desde Gyan.dev.
+profile_manager.py: Gestor de perfiles y configuraciones JSON.
 
-Extrae el archivo ffmpeg.exe de la carpeta bin.
+install.bat: Script de instalación automática de dependencias.
 
-Coloca ffmpeg.exe dentro de la carpeta raíz del proyecto (junto a main_ui.py).
+run.vbs: Lanzador silencioso.
 
-🚀 Uso
-Ejecuta el programa con doble clic en run.bat o desde la terminal:
+⚠️ Solución de Problemas
+¿El programa se cierra al abrir? Asegúrate de haber ejecutado install.bat al menos una vez para corregir las versiones de las librerías de audio.
 
-Bash
+¿No detecta el audio? Verifica que tus dispositivos de sonido no estén desconectados. El programa filtrará automáticamente los dispositivos disponibles.
 
-python main_ui.py
-Selecciona tu Perfil: Crea uno nuevo o usa el "Default".
-
-Configura el Audio:
-
-Haz clic en "Añadir Pista".
-
-Selecciona tu Micrófono y/o la Salida de Sistema (Speakers).
-
-Elige el Modo:
-
-🔴 Grabar: Grabación tradicional continua.
-
-⚡ Buffer: Mantiene los últimos segundos en RAM. Pulsa "Guardar Clip" (o el atajo) para volcarlo a disco.
-
-⚙️ Arquitectura Técnica
-RecordClip Studio funciona mediante un sistema de Multiprocesamiento y Hilos:
-
-Core de Vídeo: Un subproceso de subprocess maneja FFmpeg, enviando datos crudos de vídeo a un deque (cola) en memoria RAM si se usa el modo Buffer.
-
-Workers de Audio: Cada pista de audio seleccionada genera un threading.Thread independiente en Python. Estos hilos capturan audio usando soundcard en formato float32 y lo sincronizan manualmente.
-
-Muxing Final: Al detener la grabación o guardar un clip, el sistema invoca una segunda instancia de FFmpeg para "coser" (mux) el vídeo y los archivos de audio WAV temporales en un contenedor final MKV/MP4 sin recodificación (-c copy), garantizando velocidad instantánea.
-
-⚠️ Solución de Problemas Comunes
-Error "ModuleNotFoundError: audio_manager": Asegúrate de ejecutar el script desde la carpeta raíz.
-
-Audio Robótico: Aumenta el tamaño del búfer en el código o asegúrate de no estar forzando 96kHz en un dispositivo que solo soporta 44.1kHz.
-
-Error de NumPy: Si el programa se cierra al iniciar, ejecuta pip install "numpy<2.0" --force-reinstall.
-
-📄 Licencia
-Este proyecto es de código abierto bajo la licencia MIT. Eres libre de modificarlo, mejorarlo y distribuirlo.
-
+¿Error de FFmpeg? Asegúrate de que el archivo ffmpeg.exe está en la misma carpeta que el script.
 Desarrollado con ❤️ y mucho café.
