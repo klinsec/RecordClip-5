@@ -1,0 +1,31 @@
+{
+    "last_profile": "210",
+    "profiles": {
+        "Default": {
+            "mode": "ddagrab (GPU NVIDIA/AMD)",
+            "fps": 60,
+            "bitrate": "10000k",
+            "codec": "h264_nvenc (NVIDIA)",
+            "time": 30,
+            "fmt": "mkv",
+            "hk_rec": "<f9>",
+            "hk_rep": "<f10>"
+        },
+        "210": {
+            "mode": "ddagrab (GPU)",
+            "fps": 210,
+            "bitrate": "21000k",
+            "codec": "h264_nvenc (NVIDIA)",
+            "time": 60,
+            "fmt": "mp4",
+            "hk_rec": "<f9>",
+            "hk_rep": "<alt>+s",
+            "monitor_idx": 0,
+            "audio_tracks_names": [
+                "SteelSeries Sonar - Media (SteelSeries Sonar Virtual Audio Device)",
+                "SteelSeries Sonar - Chat (SteelSeries Sonar Virtual Audio Device)",
+                "Microphone (G432 Gaming Headset)"
+            ]
+        }
+    }
+}

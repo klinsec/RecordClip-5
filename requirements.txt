@@ -1,0 +1,5 @@
+PyQt6
+pynput
+soundcard
+soundfile
+numpy<2.0
