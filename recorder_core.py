@@ -14,8 +14,7 @@ import audio_manager
 
 class AudioWorker(threading.Thread):
     """
-    Hilo de grabación de audio de ALTA FIDELIDAD (High-Res Audio).
-    Configurado específicamente para post-producción y cámara lenta.
+    Hilo de grabación de audio de ALTA FIDELIDAD (32-bit float).
     """
     def __init__(self, device_index, device_name, filename, is_buffer_mode=False, buffer_duration=30):
         super().__init__()
@@ -24,23 +23,21 @@ class AudioWorker(threading.Thread):
         self.filename = filename
         self.running = True
         self.is_buffer_mode = is_buffer_mode
-        self.buffer_duration = buffer_duration
         
-        # --- CONFIGURACIÓN ULTRA-SLOWMOTION ---
-        # 96000 Hz: El doble del estándar. Permite reducir la velocidad del audio 
-        # sin que suene "apagado" o pierda agudos.
-        self.samplerate = 96000 
-        
-        # Block Size 8192: Búfer MASIVO.
-        # Al grabar a 96k, necesitamos un cubo mucho más grande para evitar 
-        # el "buffer underrun" (que causa el sonido robótico).
-        self.block_size = 8192 
-        
-        # Subtype FLOAT: 32-bit flotante. Calidad matemática perfecta.
+        # 48kHz es el estándar nativo para evitar glitches robóticos
+        self.samplerate = 48000 
+        self.block_size = 4096 
         self.subtype = 'FLOAT' 
         
-        # Buffer circular para Replay (calculado para 96k)
-        maxlen = int((self.samplerate * (buffer_duration + 5)) / self.block_size)
+        # Lock para evitar errores si leemos el buffer mientras se escribe
+        self.lock = threading.Lock()
+        
+        # --- BÚFER MASIVO ---
+        # Multiplicamos por 5.0 la duración para que SOBRE audio.
+        # Luego el sistema recortará el exceso, pero así aseguramos que nunca falte.
+        safety_multiplier = 5.0
+        
+        maxlen = int((self.samplerate * (buffer_duration * safety_multiplier)) / self.block_size)
         self.ram_buffer = collections.deque(maxlen=maxlen)
         self.error = None
 
@@ -49,20 +46,21 @@ class AudioWorker(threading.Thread):
             mic = audio_manager.get_mic_object_by_index(self.device_index)
             if not mic: return
 
-            # Grabación directa en 32-bit Float @ 96kHz
             if not self.is_buffer_mode:
+                # MODO GRABACIÓN
                 with sf.SoundFile(self.filename, mode='w', samplerate=self.samplerate, channels=2, subtype=self.subtype) as file:
                     with mic.recorder(samplerate=self.samplerate, blocksize=self.block_size) as recorder:
                         while self.running:
-                            # Leemos bloques grandes para asegurar estabilidad
                             data = recorder.record(numframes=self.block_size)
                             file.write(data)
             else:
-                # Buffer en RAM
+                # MODO BUFFER
                 with mic.recorder(samplerate=self.samplerate, blocksize=self.block_size) as recorder:
                     while self.running:
                         data = recorder.record(numframes=self.block_size)
-                        self.ram_buffer.append(data)
+                        # Protegemos la escritura en RAM
+                        with self.lock:
+                            self.ram_buffer.append(data)
                         
         except Exception as e:
             self.error = e
@@ -71,15 +69,25 @@ class AudioWorker(threading.Thread):
     def stop(self):
         self.running = False
     
-    def save_buffer_to_file(self):
-        if not self.ram_buffer: return False
+    def get_snapshot(self):
+        """
+        Devuelve una COPIA instantánea de lo que hay en RAM.
+        Esto se hace antes de escribir a disco para asegurar sincronía perfecta.
+        """
+        with self.lock:
+            if not self.ram_buffer: return None
+            try:
+                return np.concatenate(self.ram_buffer)
+            except: return None
+
+    def save_snapshot_to_file(self, audio_data):
+        """Escribe los datos capturados a disco"""
+        if audio_data is None: return False
         try:
-            full_audio = np.concatenate(self.ram_buffer)
-            # Guardamos manteniendo la calidad 32-bit Float
-            sf.write(self.filename, full_audio, self.samplerate, subtype=self.subtype)
+            sf.write(self.filename, audio_data, self.samplerate, subtype=self.subtype)
             return True
         except Exception as e:
-            print(f"[AUDIO-THREAD] Error volcando buffer: {e}")
+            print(f"[AUDIO-THREAD] Error guardando wav: {e}")
             return False
 
 
@@ -129,9 +137,6 @@ class RecorderCore:
         if not self.temp_dir.exists():
             self.temp_dir.mkdir(parents=True)
 
-    # ==========================================================
-    #  COMANDOS DE VIDEO (OPTIMIZADOS RTX + MEMORIA)
-    # ==========================================================
     def _get_video_cmd(self, output_target, is_buffer_mode=False):
         fps = str(self.settings["fps"])
         bitrate = self.settings["bitrate"]
@@ -142,13 +147,12 @@ class RecorderCore:
 
         cmd = [
             self.ffmpeg_exec, "-y", "-hide_banner", 
-            "-thread_queue_size", "16384", 
+            "-thread_queue_size", "9192", 
             "-rtbufsize", "2048M"
         ]
         
         if "ddagrab" in capture_mode and using_nvenc:
             cmd.extend(["-init_hw_device", "d3d11va=gpu:0", "-filter_hw_device", "gpu"])
-            # Extra frames para evitar tirones en la GPU
             cmd.extend(["-extra_hw_frames", "256"]) 
             cmd.extend([
                 "-f", "lavfi",
@@ -189,40 +193,6 @@ class RecorderCore:
         return cmd
 
     # ==========================================================
-    #  GRABACIÓN
-    # ==========================================================
-    def start_recording(self):
-        if self.is_recording: return
-        
-        timestamp = int(time.time())
-        self.temp_video_path = self.temp_dir / f"temp_vid_{timestamp}.mkv"
-        self.final_output_path = Path(self.settings["save_path"]) / f"Recording_{timestamp}.{self.settings['container']}"
-        
-        cmd = self._get_video_cmd(str(self.temp_video_path), is_buffer_mode=False)
-        print(f"[REC] Video Alta Velocidad + Audio 96kHz...")
-        self.process = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        
-        self.audio_workers = []
-        for i, track in enumerate(self.settings.get("audio_tracks", [])):
-            wav_filename = self.temp_dir / f"temp_audio_{timestamp}_{i}.wav"
-            worker = AudioWorker(track['index'], track['name'], str(wav_filename), False)
-            worker.start()
-            self.audio_workers.append(worker)
-            print(f"[REC] Pista High-Res: {track['name']}")
-
-        self.is_recording = True
-
-    def stop_recording(self):
-        if not self.is_recording: return
-        print("[STOP] Deteniendo...")
-        self._stop_ffmpeg()
-        for worker in self.audio_workers:
-            worker.stop()
-            worker.join()
-        self.is_recording = False
-        self._mux_files(self.temp_video_path, self.audio_workers, self.final_output_path)
-
-    # ==========================================================
     #  BUFFER
     # ==========================================================
     def start_replay_buffer(self):
@@ -230,7 +200,7 @@ class RecorderCore:
         self.video_ram_buffer.clear()
         
         cmd = self._get_video_cmd(None, is_buffer_mode=True)
-        print("[BUFFER] Video RAM Activo...")
+        print("[BUFFER] Video RAM Iniciado...")
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=128*1024*1024)
         
         self.is_replay_active = True
@@ -246,7 +216,9 @@ class RecorderCore:
     def _video_buffer_worker(self):
         bitrate_k = int(self.settings["bitrate"].replace('k', ''))
         bytes_per_sec = (bitrate_k * 1000) / 8
-        max_buffer_size = int(bytes_per_sec * self.settings["replay_time"] * 1.5)
+        # Reducimos el multiplicador de seguridad del video para que no se pase tanto de tiempo
+        max_buffer_size = int(bytes_per_sec * self.settings["replay_time"] * 1.3)
+        
         chunk = 8 * 1024 * 1024 
         current_size = 0
         try:
@@ -261,12 +233,53 @@ class RecorderCore:
                         current_size -= len(removed)
         except: pass
 
+    # ==========================================================
+    #  GRABACIÓN DIRECTA
+    # ==========================================================
+    def start_recording(self):
+        if self.is_recording: return
+        timestamp = int(time.time())
+        self.temp_video_path = self.temp_dir / f"temp_vid_{timestamp}.mkv"
+        self.final_output_path = Path(self.settings["save_path"]) / f"Recording_{timestamp}.{self.settings['container']}"
+        
+        cmd = self._get_video_cmd(str(self.temp_video_path), is_buffer_mode=False)
+        print(f"[REC] Grabando...")
+        self.process = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        
+        self.audio_workers = []
+        for i, track in enumerate(self.settings.get("audio_tracks", [])):
+            wav_filename = self.temp_dir / f"temp_audio_{timestamp}_{i}.wav"
+            worker = AudioWorker(track['index'], track['name'], str(wav_filename), False)
+            worker.start()
+            self.audio_workers.append(worker)
+        self.is_recording = True
+
+    def stop_recording(self):
+        if not self.is_recording: return
+        self._stop_ffmpeg()
+        for worker in self.audio_workers:
+            worker.stop()
+            worker.join()
+        self.is_recording = False
+        # En modo normal no usamos recorte, guardamos todo
+        self._mux_files(self.temp_video_path, self.audio_workers, self.final_output_path, trim_duration=None)
+
+    # ==========================================================
+    #  GUARDADO INTELIGENTE (SNAPSHOT + TRIM)
+    # ==========================================================
     def save_replay(self):
         if not self.is_replay_active: return
-        print("[SAVE] Guardando Replay...")
+        print("[SAVE] Iniciando guardado sincronizado...")
         timestamp = int(time.time())
-        ts_filename = self.temp_dir / f"temp_replay_vid_{timestamp}.ts"
         
+        # 1. CAPTURA INSTANTÁNEA (Evita desfase Video vs Audio)
+        # Capturamos el audio de la RAM *antes* de ponernos a escribir el video (que es lento)
+        audio_snapshots = []
+        for worker in self.audio_workers:
+            audio_snapshots.append(worker.get_snapshot())
+            
+        # 2. Escribir Video RAM -> Disco
+        ts_filename = self.temp_dir / f"temp_replay_vid_{timestamp}.ts"
         try:
             with open(ts_filename, "wb") as f:
                 with self.video_ram_lock:
@@ -274,15 +287,21 @@ class RecorderCore:
                         f.write(chunk)
         except: return
 
+        # 3. Escribir Audio RAM (Snapshot) -> Disco
         wav_files_workers = []
         for i, worker in enumerate(self.audio_workers):
             wav_path = self.temp_dir / f"temp_replay_aud_{timestamp}_{i}.wav"
             worker.filename = str(wav_path)
-            if worker.save_buffer_to_file():
+            # Guardamos lo que capturamos en el paso 1
+            if worker.save_snapshot_to_file(audio_snapshots[i]):
                 wav_files_workers.append(worker)
         
         final_path = Path(self.settings["save_path"]) / f"Replay_{timestamp}.{self.settings['container']}"
-        self._mux_files(ts_filename, wav_files_workers, final_path)
+        
+        # 4. UNIR Y RECORTAR EXACTAMENTE AL TIEMPO PEDIDO
+        # Pasamos replay_time para que FFmpeg corte lo que sobre
+        self._mux_files(ts_filename, wav_files_workers, final_path, trim_duration=self.settings["replay_time"])
+        
         try: os.remove(ts_filename)
         except: pass
 
@@ -295,9 +314,6 @@ class RecorderCore:
             worker.join()
         self.video_ram_buffer.clear()
 
-    # ==========================================================
-    #  MUXING (CALIDAD STUDIO)
-    # ==========================================================
     def _stop_ffmpeg(self):
         if self.process:
             try:
@@ -309,13 +325,27 @@ class RecorderCore:
                 except: pass
             self.process = None
 
-    def _mux_files(self, video_path, audio_workers_list, final_path):
-        print(f"[MUX] Generando {final_path}...")
-        cmd = [self.ffmpeg_exec, "-y", "-hide_banner", "-i", str(video_path)]
+    def _mux_files(self, video_path, audio_workers_list, final_path, trim_duration=None):
+        print(f"[MUX] Generando: {final_path}")
+        cmd = [self.ffmpeg_exec, "-y", "-hide_banner"]
+        
+        # --- TRUCO MAGICO: -sseof ---
+        # Si trim_duration es 60, le decimos a FFmpeg:
+        # "Ve al final del archivo y retrocede 60 segundos. Empieza a copiar desde ahí".
+        # Esto elimina el exceso del principio y garantiza duración exacta.
+        seek_cmd = []
+        if trim_duration:
+            seek_cmd = ["-sseof", f"-{trim_duration}"]
+        
+        # Input Video (con recorte si aplica)
+        cmd.extend(seek_cmd) 
+        cmd.extend(["-i", str(video_path)])
         
         valid_audios = []
         for worker in audio_workers_list:
             if os.path.exists(worker.filename):
+                # Input Audio (con el mismo recorte para que vayan a la par)
+                cmd.extend(seek_cmd) 
                 cmd.extend(["-i", worker.filename])
                 valid_audios.append(worker)
         
@@ -325,19 +355,9 @@ class RecorderCore:
         for i, worker in enumerate(valid_audios):
             cmd.extend(["-map", f"{i+1}:a"])
             if is_mkv:
-                # MKV soporta PCM FLOAT 32-bit (Calidad Matemática Perfecta)
-                # Esto es idéntico al WAV original, sin compresión.
-                cmd.extend([
-                    f"-c:a:{i}", "pcm_f32le", 
-                    f"-metadata:s:a:{i}", f"title={worker.device_name}"
-                ])
+                cmd.extend([f"-c:a:{i}", "pcm_f32le", f"-metadata:s:a:{i}", f"title={worker.device_name}"])
             else:
-                # MP4 requiere AAC. Usamos el bitrate máximo posible.
-                cmd.extend([
-                    f"-c:a:{i}", "aac", 
-                    f"-b:a:{i}", "320k",
-                    f"-metadata:s:a:{i}", f"title={worker.device_name}"
-                ])
+                cmd.extend([f"-c:a:{i}", "aac", f"-b:a:{i}", "320k", f"-metadata:s:a:{i}", f"title={worker.device_name}"])
         
         cmd.extend(["-c:v", "copy"])
         if not is_mkv: cmd.extend(["-bsf:a", "aac_adtstoasc"])
